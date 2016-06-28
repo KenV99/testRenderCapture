@@ -1,0 +1,11 @@
+*.py[cod]
+.idea
+*.iml
+*.exe
+*.zip
+strings.xml
+*.docx
+*.pdf
+*.dll
+*.xlsm
+*.bak
