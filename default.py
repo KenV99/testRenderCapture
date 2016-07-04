@@ -24,6 +24,7 @@ if debug:
     startdebugger()
 
 import threading
+import Queue
 from timeit import default_timer as timer
 import xbmc
 import xbmcgui
@@ -31,13 +32,6 @@ import json
 from resources.lib.utils.kodilogging import KodiLogger
 
 log = KodiLogger.log
-
-
-class VideoInfo(object):
-    def __init__(self):
-        self.height = 0
-        self.width = 0
-        self.framerate = 0
 
 
 class Player(xbmc.Player):
@@ -148,7 +142,7 @@ class Player(xbmc.Player):
                 if self.capture_thread.is_alive:
                     log(msg='Error')
                     return
-            self.capture_thread = CaptureThread(videoinfo)
+            self.capture_thread = CaptureThread(videoinfo, self)
             self.capture_thread.start()
 
     def onPlayBackEnded(self):
@@ -160,16 +154,25 @@ class Player(xbmc.Player):
         self.onPlayBackEnded()
 
 
+class BreakLoop(Exception):
+    pass
+
+
 class CaptureThread(threading.Thread):
-    def __init__(self, videoinfo):
+    def __init__(self, videoinfo, player):
+        self.player = player
         super(CaptureThread, self).__init__(name='Capture')
         self.videoinfo = videoinfo
         self.rc = xbmc.RenderCapture()
         self.abort_evt = threading.Event()
+        self.capture_monitor_thread = CaptureMonitorThread()
+        self.resultQ = self.capture_monitor_thread.resultQ
         if hasattr(self.rc, 'waitForCaptureStateChangeEvent'):
             self.legacy = True
         else:
             self.legacy = False
+        self.dropped = 0
+        self.capture_monitor_thread.start()
 
     def run(self):
         counter = 0
@@ -177,57 +180,61 @@ class CaptureThread(threading.Thread):
         timeout = 1000
         width = self.videoinfo[0] / 2
         height = self.videoinfo[1] / 2
-        log(msg='starting capture w=%i, h=%i' % (width, height))
-        result = {}
-        result0 = {}
+        log(msg=u'starting capture w=%i, h=%i' % (width, height))
         if self.legacy:
             self.rc.capture(width, height, xbmc.CAPTURE_FLAG_CONTINUOUS)
-            capturefn = self.get_frameL
+            capturefn = self.get_frameLegacy
+            log(msg='legacy capture')
         else:
-            capturefn = self.get_frameK
-        for loopsleep in range(20, 0, -1):
-            log(msg='xbmc.sleep(%i)' % loopsleep)
-            for timeout in xrange(100, -1, -10):
-                for i in xrange(1, 11):
-                    if self.abort_evt.is_set():
-                        return
-                    t0 = timer()
-                    image = capturefn(timeout, width, height)
-                    te = timer() - t0
-                    result0[i] = [loopsleep, te, len(image)]
-                    counter += 1
-                    xbmc.sleep(loopsleep)
-                result[timeout] = result0
+            capturefn = self.get_frameKrypton
+            log(msg='krypton capture')
+        try:
+            for loopsleep in range(20, -1, -5):
+                log(msg='xbmc.sleep(%i)' % loopsleep)
+                for capturesleep in xrange(10, -1, -5):
+                    capturesleepms = capturesleep / 1000.0
+                    for timeout in xrange(100, -1, -10):
+                        for frame in xrange(1, 11):
+                            if self.abort_evt.is_set():
+                                raise BreakLoop
+                            try:
+                                playtime = self.player.getTime()
+                            except RuntimeError:
+                                playtime = 0
+                            t0 = timer()
+                            image = capturefn(timeout, width, height, sleep=capturesleep)
+                            te = timer() - t0 - capturesleepms
+                            self.resultQ.put([playtime, loopsleep, timeout, capturesleep, frame, te, len(image)])
+                            counter += 1
+                            xbmc.sleep(loopsleep)
+        except BreakLoop:
+            elapsed = timer() - time0
+            self.capture_monitor_thread.abort(totalelapsed=elapsed)
+            log(msg=u'timeout = %s' % timeout)
+            log(msg=u'counter = %s' % counter)
+            log(msg=u'dropped = %s' % self.dropped)
+            log(msg=u'elapsed = %s' % elapsed)
+            log(msg=u'framerate = %s' % str(counter / elapsed))
 
-        elapsed = timer() - time0
-        log(msg='timeout = %s' % timeout)
-        log(msg='counter = %s' % counter)
-        log(msg='elapsed = %s' % elapsed)
-        log(msg='framerate = %s' % str(counter / elapsed))
-        self.printresult(result)
-        xbmcgui.Dialog().notification('testRenderCapture', 'DONE')
+            xbmcgui.Dialog().notification(u'testRenderCapture', u'DONE')
 
-    def printresult(self, result):
-        with open(r'C:\Temp\output.txt', 'w') as f:
-            for loopsleep in range (20, 0, -1):
-                for timeout in xrange(100, -1, -10):
-                    result0 = result[timeout]
-                    for i in xrange(1, 11):
-                        f.write('%i,%i,%i,%s,%i\n' % (timeout, i, result0[i][0], str(result0[i][1]), result0[i][2]))
-
-    def get_frameK(self, timeout, width, height):
+    def get_frameKrypton(self, timeout, width, height, sleep=0):
         try:
             self.rc.capture(width, height)
+            if sleep > 0:
+                xbmc.sleep(sleep)
             image = self.rc.getImage(timeout)
         except Exception as e:
-            log(msg='Exception: %s' % str(e))
+            log(msg=u'Exception: %s' % unicode(e))
             return bytearray(b'')
         else:
+            if len(image) == 0:
+                self.dropped += 1
             return image
 
-    def get_frameL(self, timeout, width, height):
+    def get_frameLegacy(self, timeout, *_):
         try:
-            self.rc.waitForCaptureStateChangeEvent(15)
+            self.rc.waitForCaptureStateChangeEvent(timeout)
             cs = self.rc.getCaptureState()
             if cs == xbmc.CAPTURE_STATE_DONE:
                 image = self.rc.getImage()
@@ -239,59 +246,50 @@ class CaptureThread(threading.Thread):
         else:
             return image
 
-    def abort(self):
+    def abort(self, timeout=5):
         self.abort_evt.set()
         if self.is_alive():
-            self.join(3)
+            self.join(timeout)
 
 
-# class CaptureMonitorThread(threading.Thread):
-#
-#     def __init__(self, videoinfo, changesleepQ):
-#         super(CaptureMonitorThread, self).__init__(name='CaptureMonitor')
-#         self.videoinfo = videoinfo
-#         self.changesleepQ = changesleepQ
-#         self.abort_evt = threading.Event()
-#         self.screenshot = threading.Event()
-#         self.imageQ = Queue.Queue()
-#         self.timestart = None
-#         self.framecounter = 0
-#         self.droppedframes = 0
-#
-#     def run(self):
-#         delay = 0
-#         self.abort_evt.clear()
-#         self.screenshot.clear()
-#         while not self.abort_evt.is_set():
-#             while not self.imageQ.empty():
-#                 try:
-#                     image, ts = self.imageQ.get(block=True, timeout=1)
-#                 except Queue.Empty:
-#                     pass
-#                 else:
-#                     l = len(image)
-#                     if l == 0:
-#                         self.droppedframes += 1
-#                     else:
-#                         elapsed = timer() - ts
-#                         delay = delay + elapsed
-#                         self.framecounter += 1
-#                         if self.screenshot.is_set():
-#                             pass
-#                         xbmc.sleep(5)
-#         log(msg = 'totaldelay = %s' % delay)
-#         log(msg = 'framecount = %s' % self.framecounter)
-#         log(msg='dropped = %s' % self.droppedframes)
-#         log(msg='delay = %s' % str(delay/self.framecounter))
-#
-#     def abort(self):
-#         self.abort_evt.set()
-#         if self.is_alive():
-#             self.join(3)
+class CaptureMonitorThread(threading.Thread):
+    def __init__(self):
+        super(CaptureMonitorThread, self).__init__(name='CaptureMonitor')
+        self.abort_evt = threading.Event()
+        self.resultQ = Queue.Queue()
+        self.totalelapsed = 0
+
+    def run(self):
+        self.abort_evt.clear()
+        f = open(r'C:\Temp\output.csv', 'w', 0)
+        f.write('"playtime","loopsleep","timeout","capturesleep","frame","timeelapsed","imagelength"\n')
+        timerequestingframes = 0
+        while not self.abort_evt.is_set():
+            while not self.resultQ.empty():
+                try:
+                    result = self.resultQ.get(block=True, timeout=1)
+                except Queue.Empty:
+                    pass
+                else:
+                    f.write('%s,%i,%i,%i,%i,%s,%i\n' % (
+                        "{0:.4f}".format(result[0]), result[1], result[2], result[3], result[4],
+                        "{0:.4f}".format(result[5]), result[6]))
+                    timerequestingframes += result[5]
+        f.close()
+        if self.totalelapsed != 0:
+            log(msg='Percent time waiting for frames: %s' % "{0:.2f}".format(
+                timerequestingframes / self.totalelapsed * 100.0))
+
+    def abort(self, timeout=5, totalelapsed=0):
+        self.totalelapsed = totalelapsed
+        self.abort_evt.set()
+        if self.is_alive():
+            self.join(timeout)
+
 
 if __name__ == '__main__':
     KodiLogger.setLogLevel(KodiLogger.LOGNOTICE)
-    log(msg='Starting Up')
+    log(msg=u'Starting Up')
     p = Player()
     m = xbmc.Monitor()
     m.waitForAbort()
