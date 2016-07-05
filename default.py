@@ -179,11 +179,9 @@ class CaptureThread(threading.Thread):
 
     def run(self):
         counter = 0
-        time0 = timer()
         timeout = 1000
         width = self.videoinfo[0] / 2
         height = self.videoinfo[1] / 2
-        log(msg=u'starting capture w=%i, h=%i' % (width, height))
         if self.legacy:
             self.rc.capture(width, height, xbmc.CAPTURE_FLAG_CONTINUOUS)
             capturefn = self.get_frameLegacy
@@ -203,6 +201,8 @@ class CaptureThread(threading.Thread):
         overhead = overheadtotal/100.0
         self.dropped = 0
         log(msg='overhead for capture function: %s ms' % str(overhead * 1000.0))
+        log(msg=u'starting capture w=%i, h=%i' % (width, height))
+        time0 = timer()
         try:
             for loopsleep in range(20, -1, -5):  # sleep in between frames
                 log(msg=u'xbmc.sleep(%i)' % loopsleep)
