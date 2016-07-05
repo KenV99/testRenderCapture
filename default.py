@@ -187,10 +187,22 @@ class CaptureThread(threading.Thread):
         if self.legacy:
             self.rc.capture(width, height, xbmc.CAPTURE_FLAG_CONTINUOUS)
             capturefn = self.get_frameLegacy
+            overheadfn = self.get_frameLegacyOverhead
             log(msg=u'legacy capture')
         else:
             capturefn = self.get_frameKrypton
+            overheadfn = self.get_frameKryptonOverhead
             log(msg=u'krypton capture')
+        overheadtotal = 0.0
+        for i in xrange(0, 100):
+            capturesleepms = 5/1000
+            t0 = timer()
+            _ = overheadfn(width,height, 5)
+            te = timer() - t0 - capturesleepms
+            overheadtotal += te
+        overhead = overheadtotal/100.0
+        self.dropped = 0
+        log(msg='overhead for capture function: %s ms' % str(overhead * 1000.0))
         try:
             for loopsleep in range(20, -1, -5):  # sleep in between frames
                 log(msg=u'xbmc.sleep(%i)' % loopsleep)
@@ -206,7 +218,7 @@ class CaptureThread(threading.Thread):
                                 playtime = 0
                             t0 = timer()
                             image = capturefn(timeout, width, height, sleep=capturesleep)
-                            te = timer() - t0 - capturesleepms  # subtract the amount of xbmc.sleep
+                            te = timer() - t0 - overhead - capturesleepms  # subtract the amount of xbmc.sleep
                             self.resultQ.put([playtime, loopsleep, timeout, capturesleep, frame, te, len(image)])
                             counter += 1
                             xbmc.sleep(loopsleep)  # unclear if this helps avoid GIL issues
@@ -249,6 +261,35 @@ class CaptureThread(threading.Thread):
         else:
             return image
 
+    def get_frameKryptonOverhead(self, timeout, width, height, sleep=0):
+        try:
+            pass # self.rc.capture(width, height)
+            if sleep > 0:
+                xbmc.sleep(sleep)  # unclear if this helps avoid GIL issues
+            image = bytearray(b' ') # image = self.rc.getImage(timeout)
+        except Exception as e:
+            log(msg=u'Exception: %s' % unicode(e))
+            return bytearray(b'')
+        else:
+            if len(image) == 0:
+                self.dropped += 1
+            return image
+
+    def get_frameLegacyOverhead(self, timeout, *_):
+        try:
+            pass # self.rc.waitForCaptureStateChangeEvent(timeout)
+            cs = xbmc.CAPTURE_STATE_DONE # cs = self.rc.getCaptureState()
+            if cs == xbmc.CAPTURE_STATE_DONE:
+                image = bytearray(b' ') # image = self.rc.getImage()
+            else:
+                self.dropped += 1
+                return bytearray(b'')
+        except Exception as e:
+            log(msg=u'Exception: %s' % str(e))
+            return bytearray(b'')
+        else:
+            return image
+
     def abort(self, timeout=5):
         self.abort_evt.set()
         if self.is_alive():
@@ -280,7 +321,7 @@ class CaptureMonitorThread(threading.Thread):
                 else:
                     f.write('%s,%i,%i,%i,%i,%s,%i\n' % (
                         "{0:.4f}".format(result[0]), result[1], result[2], result[3], result[4],
-                        "{0:.4f}".format(result[5]), result[6]))
+                        "{0:.4f}".format(result[5] * 1000.0), result[6]))
                     timerequestingframes += result[5]
             xbmc.sleep(5)  # unclear if this helps avoid GIL issues
         f.close()
