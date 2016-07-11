@@ -23,6 +23,7 @@ from resources.lib.utils.debugger import startdebugger
 if debug:
     startdebugger()
 
+import sys
 import threading
 import Queue
 from timeit import default_timer as timer
@@ -204,12 +205,12 @@ class CaptureThread(threading.Thread):
         log(msg=u'starting capture w=%i, h=%i' % (width, height))
         time0 = timer()
         try:
-            for loopsleep in range(20, -1, -5):  # sleep in between frames
+            for loopsleep in range(0, -1, -5):  # sleep in between frames
                 log(msg=u'xbmc.sleep(%i)' % loopsleep)
-                for capturesleep in xrange(10, -1, -5):  # sleep between capture request and getImage
+                for capturesleep in xrange(0, -1, -5):  # sleep between capture request and getImage
                     capturesleepms = capturesleep / 1000.0
-                    for timeout in xrange(100, -1, -10):  # timeout parameter for getImage
-                        for frame in xrange(1, 11):
+                    for timeout in xrange(20, 4, -5):  # timeout parameter for getImage
+                        for frame in xrange(1, 251):
                             if self.abort_evt.is_set():
                                 raise BreakLoop
                             try:
@@ -223,15 +224,17 @@ class CaptureThread(threading.Thread):
                             counter += 1
                             xbmc.sleep(loopsleep)  # unclear if this helps avoid GIL issues
         except BreakLoop:
-            elapsed = timer() - time0
-            self.capture_monitor_thread.abort(totalelapsed=elapsed)
-            log(msg=u'timeout = %s' % timeout)
-            log(msg=u'counter = %s' % counter)
-            log(msg=u'dropped = %s' % self.dropped)
-            log(msg=u'elapsed = %s' % elapsed)
-            log(msg=u'framerate = %s' % str(counter / elapsed))
+            pass
 
-            xbmcgui.Dialog().notification(u'testRenderCapture', u'DONE')
+        elapsed = timer() - time0
+        self.capture_monitor_thread.abort(totalelapsed=elapsed)
+        log(msg=u'timeout = %s' % timeout)
+        log(msg=u'counter = %s' % counter)
+        log(msg=u'dropped = %s' % self.dropped)
+        log(msg=u'elapsed = %s' % elapsed)
+        log(msg=u'framerate = %s' % str(counter / elapsed))
+
+        xbmcgui.Dialog().notification(u'testRenderCapture', u'DONE')
 
     def get_frameKrypton(self, timeout, width, height, sleep=0):
         try:
@@ -309,7 +312,11 @@ class CaptureMonitorThread(threading.Thread):
 
     def run(self):
         self.abort_evt.clear()
-        f = open(r'C:\Temp\output.csv', 'w', 0)  # '0' buffersize so that line is immediately written to file
+        if sys.platform.lower().startswith('win'):
+            fn = r'C:\temp\output.csv'
+        else:
+            fn = r'/home/ken/output.csv'
+        f = open(fn, 'w', 0)  # '0' buffersize so that line is immediately written to file
         f.write('"playtime","loopsleep","timeout","capturesleep","frame","timeelapsed","imagelength"\n')  # header for import
         timerequestingframes = 0
         while not self.abort_evt.is_set():
