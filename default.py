@@ -176,6 +176,7 @@ class CaptureThread(threading.Thread):
             self.legacy = False
         self.dropped = 0
         self.capture_monitor_thread.start()
+        self.dummyQ = Queue.Queue()
 
     def run(self):
         counter = 0
@@ -204,24 +205,27 @@ class CaptureThread(threading.Thread):
         log(msg=u'starting capture w=%i, h=%i' % (width, height))
         time0 = timer()
         try:
-            for loopsleep in range(20, -1, -5):  # sleep in between frames
-                log(msg=u'xbmc.sleep(%i)' % loopsleep)
-                for capturesleep in xrange(10, -1, -5):  # sleep between capture request and getImage
-                    capturesleepms = capturesleep / 1000.0
-                    for timeout in xrange(100, -1, -10):  # timeout parameter for getImage
-                        for frame in xrange(1, 11):
-                            if self.abort_evt.is_set():
-                                raise BreakLoop
-                            try:
-                                playtime = self.player.getTime()
-                            except RuntimeError:
-                                playtime = 0
-                            t0 = timer()
-                            image = capturefn(timeout, width, height, sleep=capturesleep)
-                            te = timer() - t0 - overhead - capturesleepms  # subtract the amount of xbmc.sleep
-                            self.resultQ.put([playtime, loopsleep, timeout, capturesleep, frame, te, len(image)])
-                            counter += 1
-                            xbmc.sleep(loopsleep)  # unclear if this helps avoid GIL issues
+            for capturefn in [self.get_fromqueue, self.get_frameKrypton]:
+                # for loopsleep in range(20, -1, -5):  # sleep in between frames
+                loopsleep = 5
+                # log(msg=u'xbmc.sleep(%i)' % loopsleep)
+                capturesleep = 0
+                # for capturesleep in xrange(10, -1, -5):  # sleep between capture request and getImage
+                capturesleepms = capturesleep / 1000.0
+                for timeout in xrange(5, 21, 5):  # timeout parameter for getImage
+                    for frame in xrange(1, 251):
+                        if self.abort_evt.is_set():
+                            raise BreakLoop
+                        try:
+                            playtime = self.player.getTime()
+                        except RuntimeError:
+                            playtime = 0
+                        t0 = timer()
+                        image = capturefn(timeout, width, height, sleep=capturesleep)
+                        te = timer() - t0 - overhead - capturesleepms  # subtract the amount of xbmc.sleep
+                        self.resultQ.put([playtime, loopsleep, timeout, capturesleep, frame, te, len(image)])
+                        counter += 1
+                        xbmc.sleep(loopsleep)  # unclear if this helps avoid GIL issues
         except BreakLoop:
             elapsed = timer() - time0
             self.capture_monitor_thread.abort(totalelapsed=elapsed)
@@ -231,7 +235,24 @@ class CaptureThread(threading.Thread):
             log(msg=u'elapsed = %s' % elapsed)
             log(msg=u'framerate = %s' % str(counter / elapsed))
 
-            xbmcgui.Dialog().notification(u'testRenderCapture', u'DONE')
+        xbmcgui.Dialog().notification(u'testRenderCapture', u'DONE')
+
+    def get_fromqueue(self, timeout, width, height, sleep=0):
+        try:
+            if sleep > 0:
+                xbmc.sleep(sleep)  # unclear if this helps avoid GIL issues
+            try:
+                self.dummyQ.get(block=True, timeout=timeout/1000.0)
+            except Queue.Empty:
+                pass
+            image = bytearray('b')
+        except Exception as e:
+            log(msg=u'Exception: %s' % unicode(e))
+            return bytearray(b'')
+        else:
+            if len(image) == 0:
+                self.dropped += 1
+            return image
 
     def get_frameKrypton(self, timeout, width, height, sleep=0):
         try:
