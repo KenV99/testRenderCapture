@@ -226,7 +226,7 @@ class CaptureThread(threading.Thread):
                         image = capturefn(timeout, width, height, sleep=capturesleep)
                         te = timer() - t0 - overhead - capturesleepms  # subtract the amount of xbmc.sleep
                         duplicate = (image == self.lastimage)
-                        if not duplicate:
+                        if not duplicate and len(image) > 1:
                             uniqueframes += 1
                         counter += 1
                         self.resultQ.put(

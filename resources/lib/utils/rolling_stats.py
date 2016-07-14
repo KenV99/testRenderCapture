@@ -124,7 +124,6 @@ class RollingStats(bar):
 
 
 if __name__ == '__main__':
-    # testQ(10)
     import numpy
 
     lst = [float(i) for i in xrange(-100, 101)]
