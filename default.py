@@ -164,6 +164,7 @@ class CaptureThread(threading.Thread):
     '''
     Run the capture routine in a separate thread and call abort if playback ends
     '''
+
     def __init__(self, videoinfo, player):
         self.player = player
         super(CaptureThread, self).__init__(name='Capture')
@@ -198,12 +199,12 @@ class CaptureThread(threading.Thread):
             log(msg=u'krypton capture')
         overheadtotal = 0.0
         for i in xrange(0, 100):
-            capturesleepms = 5/1000
+            capturesleepms = 5 / 1000
             t0 = timer()
-            _ = overheadfn(width,height, 5)
+            _ = overheadfn(width, height, 5)
             te = timer() - t0 - capturesleepms
             overheadtotal += te
-        overhead = overheadtotal/100.0
+        overhead = overheadtotal / 100.0
         self.dropped = 0
         log(msg='overhead for capture function: %s ms' % str(overhead * 1000.0))
         log(msg=u'starting capture w=%i, h=%i' % (width, height))
@@ -217,18 +218,19 @@ class CaptureThread(threading.Thread):
                 capturesleep = 0
                 # for capturesleep in xrange(10, -1, -5):  # sleep between capture request and getImage
                 capturesleepms = capturesleep / 1000.0
-                for timeout in xrange(5, 41, 5):  # timeout parameter for getImage
+                for timeout in xrange(80, 9, -10):  # timeout parameter for getImage
                     for frame in xrange(1, 251):
                         if self.abort_evt.is_set():
                             raise BreakLoop
                         t0 = timer()
                         image = capturefn(timeout, width, height, sleep=capturesleep)
                         te = timer() - t0 - overhead - capturesleepms  # subtract the amount of xbmc.sleep
-                        duplicate = (image==self.lastimage)
+                        duplicate = (image == self.lastimage)
                         if not duplicate:
                             uniqueframes += 1
                         counter += 1
-                        self.resultQ.put([t0-time0, loopsleep, timeout, capturesleep, frame, te, len(image), duplicate])
+                        self.resultQ.put(
+                            [t0 - time0, loopsleep, timeout, capturesleep, frame, te, len(image), duplicate])
                         self.lastimage = image
                         xbmc.sleep(loopsleep)  # unclear if this helps avoid GIL issues
             except BreakLoop:
@@ -245,7 +247,6 @@ class CaptureThread(threading.Thread):
         log(msg=u'framerate = %s' % str(counter / elapsed))
         log(msg=u'uniqueframerate = %s' % str(uniqueframes / elapsed))
 
-
         xbmcgui.Dialog().notification(u'testRenderCapture', u'DONE')
 
     def get_fromqueue(self, timeout, width, height, sleep=0):
@@ -253,7 +254,7 @@ class CaptureThread(threading.Thread):
             if sleep > 0:
                 xbmc.sleep(sleep)  # unclear if this helps avoid GIL issues
             try:
-                self.dummyQ.get(block=True, timeout=timeout/1000.0)
+                self.dummyQ.get(block=True, timeout=timeout / 1000.0)
             except Queue.Empty:
                 pass
             image = bytearray('b')
@@ -286,6 +287,7 @@ class CaptureThread(threading.Thread):
             if cs == xbmc.CAPTURE_STATE_DONE:
                 image = self.rc.getImage()
             else:
+                self.dropped += 1
                 return bytearray(b'')
         except Exception as e:
             log(msg=u'Exception: %s' % str(e))
@@ -295,10 +297,10 @@ class CaptureThread(threading.Thread):
 
     def get_frameKryptonOverhead(self, timeout, width, height, sleep=0):
         try:
-            pass # self.rc.capture(width, height)
+            pass  # self.rc.capture(width, height)
             if sleep > 0:
                 xbmc.sleep(sleep)  # unclear if this helps avoid GIL issues
-            image = bytearray(b' ') # image = self.rc.getImage(timeout)
+            image = bytearray(b' ')  # image = self.rc.getImage(timeout)
         except Exception as e:
             log(msg=u'Exception: %s' % unicode(e))
             return bytearray(b'')
@@ -309,10 +311,10 @@ class CaptureThread(threading.Thread):
 
     def get_frameLegacyOverhead(self, timeout, *_):
         try:
-            pass # self.rc.waitForCaptureStateChangeEvent(timeout)
-            cs = xbmc.CAPTURE_STATE_DONE # cs = self.rc.getCaptureState()
+            pass  # self.rc.waitForCaptureStateChangeEvent(timeout)
+            cs = xbmc.CAPTURE_STATE_DONE  # cs = self.rc.getCaptureState()
             if cs == xbmc.CAPTURE_STATE_DONE:
-                image = bytearray(b' ') # image = self.rc.getImage()
+                image = bytearray(b' ')  # image = self.rc.getImage()
             else:
                 self.dropped += 1
                 return bytearray(b'')
@@ -333,6 +335,7 @@ class CaptureMonitorThread(threading.Thread):
     Writes frame by frame results to file.
     Runs in separate thread to avoid possible I/O bound waiting.
     '''
+
     def __init__(self):
         super(CaptureMonitorThread, self).__init__(name='CaptureMonitor')
         self.abort_evt = threading.Event()
@@ -346,7 +349,8 @@ class CaptureMonitorThread(threading.Thread):
         else:
             fn = os.path.expanduser(r'~/.kodi/output.csv')
         f = open(fn, 'w', 0)  # '0' buffersize so that line is immediately written to file
-        f.write('"playtime","loopsleep","timeout","capturesleep","frame","timeelapsed","imagelength","dup"\n')  # header for import
+        f.write(
+            '"playtime","loopsleep","timeout","capturesleep","frame","timeelapsed","imagelength","dup"\n')  # header for import
         timerequestingframes = 0
         while not self.abort_evt.is_set():
             while not self.resultQ.empty():

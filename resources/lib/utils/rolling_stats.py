@@ -16,8 +16,10 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
-import queue
 from collections import deque
+
+import queue
+
 try:
     import xbmc
 except ImportError:
@@ -119,26 +121,6 @@ class RollingStats(bar):
                     self.calc(value)
             else:
                 self.sleep()
-
-
-def testQ(num):
-    from timeit import default_timer as timer
-    timea = []
-    q = queue.Queue()
-    for timeout in xrange(100, -1, -10):
-        times = []
-        for i in xrange(0, num):
-            t = timeout / 1000.0
-            t0 = timer()
-            try:
-                q.get(block=True, timeout=t)
-            except queue.Empty:
-                pass
-            times.append(timer() - t0)
-        timea.append((timeout, times))
-    import numpy
-    for timeout, times in timea:
-        print timeout, numpy.mean(times) * 1000.0, numpy.std(times) * 1000.0
 
 
 if __name__ == '__main__':
