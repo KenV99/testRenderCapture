@@ -11,7 +11,7 @@
     <description lang="en">testRenderCapture</description>
     <disclaimer lang="en">testRenderCapture</disclaimer>
     <language></language>
-    <platform>windx</platform>
+    <platform>all</platform>
     <license>GNU GENERAL PUBLIC LICENSE. Version 2, June 1991</license>
     <forum></forum>
     <website></website>
